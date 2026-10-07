@@ -1,0 +1,10 @@
+auto lo
+iface lo inet loopback
+
+auto wlan0
+iface wlan0 inet dhcp
+    pre-up n=0; while [ ! -e /sys/class/net/wlan0 ] && [ $n -lt 20 ]; do sleep 1; n=$((n+1)); done
+    pre-up wpa_supplicant -B -D nl80211 -i wlan0 -c /etc/wpa_supplicant.conf -P /var/run/wpa_supplicant.wlan0.pid -s
+    udhcpc_opts -t 10
+    post-up iw dev wlan0 set power_save off
+    post-down kill $(cat /var/run/wpa_supplicant.wlan0.pid) 2>/dev/null || true

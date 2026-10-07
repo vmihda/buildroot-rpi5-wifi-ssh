@@ -1,0 +1,75 @@
+#!/bin/sh
+#
+# Collects Wi-Fi diagnostics for 5 minutes after boot and saves them to
+# the FAT boot partition as netdiag.txt, so the report can be read by
+# inserting the SD card into any computer (no HDMI or network needed).
+# The report is rewritten every minute, so pulling the card early still
+# leaves a partial report.
+#
+
+REPORT_DIR=/boot
+REPORT="${REPORT_DIR}/netdiag.txt"
+TIMELINE=/tmp/netdiag-timeline.txt
+TMP=/tmp/netdiag.txt
+
+save_report() {
+	{
+		echo "=== netdiag, boot at $(date), uptime $(cut -d' ' -f1 /proc/uptime) ==="
+		uname -a
+		echo "--- modprobe options"
+		modprobe -c | grep '^options brcmfmac'
+		echo "--- timeline: uptime, wpa_state, freq, IPv4"
+		cat "$TIMELINE"
+		echo "--- iw link"
+		iw dev wlan0 link
+		echo "--- power_save"
+		iw dev wlan0 get power_save
+		echo "--- scan results seen by wpa_supplicant (bssid freq signal flags ssid)"
+		wpa_cli scan_results
+		echo "--- iw reg get"
+		iw reg get
+		echo "--- wpa_supplicant log (from syslog, including rotated file)"
+		cat /var/log/messages.0 /var/log/messages 2>/dev/null | grep wpa_supplicant
+		echo "--- dmesg (brcmfmac/cfg80211, last 40 lines)"
+		dmesg | grep -iE 'brcmf|cfg80211' | tail -40
+	} > "$TMP" 2>&1
+
+	mkdir -p "$REPORT_DIR"
+	if mount -t vfat /dev/mmcblk0p1 "$REPORT_DIR"; then
+		cp "$TMP" "$REPORT"
+		sync
+		umount "$REPORT_DIR"
+	fi
+}
+
+collect() {
+	: > "$TIMELINE"
+	i=0
+	# 60 samples x 5 s = 5 minutes
+	while [ $i -lt 60 ]; do
+		status=$(wpa_cli status 2>/dev/null)
+		state=$(echo "$status" | grep '^wpa_state')
+		freq=$(echo "$status" | grep '^freq')
+		ip4=$(ip -4 addr show wlan0 2>/dev/null | awk '/inet /{print $2}')
+		echo "$(cut -d' ' -f1 /proc/uptime) $state $freq $ip4" >> "$TIMELINE"
+		sleep 5
+		i=$((i + 1))
+		# Rewrite the report every minute
+		[ $((i % 12)) -eq 0 ] && save_report
+	done
+}
+
+case "$1" in
+	start)
+		printf "Starting netdiag (report goes to boot partition): "
+		# Run in background so the boot is not delayed
+		collect &
+		echo "OK"
+		;;
+	stop)
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac

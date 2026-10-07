@@ -1,0 +1,8 @@
+# Built image: large binary, contains Wi-Fi PSK and root password hash
+*.img
+
+# Build-time secrets; keep them outside the repo (see secrets.env.example)
+*.env
+
+# macOS metadata
+.DS_Store
